@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Notes App</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        .note-card { transition: all 0.3s; }
+        .note-card:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        #message { position: fixed; top: 20px; right: 20px; z-index: 1000; min-width: 300px; }
+        .search-box { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .stats-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .pagination { justify-content: center; }
+        .loading { display: none; text-align: center; padding: 20px; }
+        .loading.show { display: block; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container">
+            <span class="navbar-brand"><i class="bi bi-journal-text"></i> Notes App</span>
+            <div>
+                <span class="text-white me-3" id="usernameDisplay"></span>
+                <button class="btn btn-light" onclick="logout()"><i class="bi bi-box-arrow-right"></i> Выход</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div id="message"></div>
+
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card stats-card">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-pencil-square"></i> Всего заметок</h5>
+                        <h2 id="totalNotes">0</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stats-card">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-calendar"></i> Заметок в день</h5>
+                        <h2 id="notesPerDay">0</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stats-card">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-person"></i> Аккаунт создан</h5>
+                        <h6 id="accountCreated">-</h6>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5><i class="bi bi-plus-circle"></i> Новая заметка</h5>
+                <div class="row">
+                    <div class="col-md-4 mb-2">
+                        <input type="text" class="form-control" id="title" placeholder="Заголовок">
+                    </div>
+                    <div class="col-md-6 mb-2">
+                        <input type="text" class="form-control" id="content" placeholder="Текст заметки">
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-success w-100" onclick="createNote()">
+                            <i class="bi bi-save"></i> Создать
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="search-box mb-4">
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="searchInput" placeholder="Поиск по заметкам..." onkeyup="debouncedSearch()">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="sortBy" onchange="loadNotes()">
+                        <option value="created_at">По дате создания</option>
+                        <option value="title">По заголовку</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <select class="form-select" id="sortOrder" onchange="loadNotes()">
+                        <option value="desc">Сначала новые</option>
+                        <option value="asc">Сначала старые</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <select class="form-select" id="perPage" onchange="loadNotes()">
+                        <option value="5">5 на странице</option>
+                        <option value="10" selected>10 на странице</option>
+                        <option value="20">20 на странице</option>
+                        <option value="50">50 на странице</option>
+                    </select>
+                </div>
+                <div class="col-md-1">
+                    <button class="btn btn-outline-primary w-100" onclick="loadNotes()">
+                        <i class="bi bi-arrow-repeat"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="notes-list" class="row"></div>
+
+        <div class="loading" id="loading">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+        </div>
+
+        <nav aria-label="Page navigation" class="mt-4">
+            <ul class="pagination" id="pagination"></ul>
+        </nav>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        let currentPage = 1;
+        let totalPages = 1;
+        let searchTimeout;
+
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/login';
+        }
+
+        function showMessage(text, isError = false) {
+            const msgDiv = document.getElementById('message');
+            msgDiv.innerHTML = `<div class="alert ${isError ? 'alert-danger' : 'alert-success'} alert-dismissible fade show">${text}</div>`;
+            setTimeout(() => msgDiv.innerHTML = '', 3000);
+        }
+
+        function debouncedSearch() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                currentPage = 1;
+                loadNotes();
+            }, 500);
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE}/stats`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+
+                if (response.ok) {
+                    const stats = await response.json();
+                    document.getElementById('totalNotes').textContent = stats.total_notes;
+                    document.getElementById('notesPerDay').textContent = stats.notes_per_day;
+                    document.getElementById('accountCreated').textContent = new Date(stats.account_created).toLocaleDateString();
+                    document.getElementById('usernameDisplay').textContent = stats.username;
+                }
+            } catch (error) {
+                console.error('Stats error:', error);
+            }
+        }
+
+        async function loadNotes() {
+            const loading = document.getElementById('loading');
+            loading.classList.add('show');
+
+            try {
+                const search = document.getElementById('searchInput').value;
+                const sortBy = document.getElementById('sortBy').value;
+                const sortOrder = document.getElementById('sortOrder').value;
+                const perPage = document.getElementById('perPage').value;
+
+                let url = `${API_BASE}/notes?page=${currentPage}&per_page=${perPage}&sort_by=${sortBy}&sort_order=${sortOrder}`;
+                if (search) {
+                    url += `&search=${encodeURIComponent(search)}`;
+                }
+
+                const response = await fetch(url, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+
+                if (response.status === 401) {
+                    logout();
+                    return;
+                }
+
+                const data = await response.json();
+                displayNotes(data.items);
+                updatePagination(data);
+                loadStats();
+            } catch (error) {
+                showMessage('Ошибка загрузки заметок', true);
+            } finally {
+                loading.classList.remove('show');
+            }
+        }
+
+        function displayNotes(notes) {
+            const container = document.getElementById('notes-list');
+
+            if (notes.length === 0) {
+                container.innerHTML = '<div class="col-12"><p class="text-muted text-center">Нет заметок</p></div>';
+                return;
+            }
+
+            let html = '';
+            notes.forEach(note => {
+                html += `
+                    <div class="col-md-6 col-lg-4 mb-3">
+                        <div class="card note-card h-100">
+                            <div class="card-body">
+                                <h5 class="card-title">${escapeHtml(note.title)}</h5>
+                                <p class="card-text">${escapeHtml(note.content)}</p>
+                                <p class="text-muted small">
+                                    <i class="bi bi-clock"></i> ${new Date(note.created_at).toLocaleString()}
+                                </p>
+                                <div class="btn-group w-100">
+                                    <button class="btn btn-sm btn-outline-primary" onclick="editNote(${note.id})">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteNote(${note.id})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        function updatePagination(data) {
+            currentPage = data.page;
+            totalPages = data.pages;
+
+            let html = '';
+
+            html += `
+                <li class="page-item ${!data.has_prev ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="${data.has_prev ? `changePage(${data.page - 1})` : 'return false'}">«</a>
+                </li>
+            `;
+
+            for (let i = 1; i <= data.pages; i++) {
+                if (i === 1 || i === data.pages || (i >= data.page - 2 && i <= data.page + 2)) {
+                    html += `
+                        <li class="page-item ${i === data.page ? 'active' : ''}">
+                            <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
+                        </li>
+                    `;
+                } else if (i === data.page - 3 || i === data.page + 3) {
+                    html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                }
+            }
+
+            html += `
+                <li class="page-item ${!data.has_next ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="${data.has_next ? `changePage(${data.page + 1})` : 'return false'}">»</a>
+                </li>
+            `;
+
+            document.getElementById('pagination').innerHTML = html;
+        }
+
+        function changePage(page) {
+            currentPage = page;
+            loadNotes();
+        }
+
+        async function createNote() {
+            const title = document.getElementById('title').value.trim();
+            const content = document.getElementById('content').value.trim();
+
+            if (!title || !content) {
+                showMessage('Заполните все поля', true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/notes`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify({ title, content })
+                });
+
+                if (response.ok) {
+                    document.getElementById('title').value = '';
+                    document.getElementById('content').value = '';
+                    showMessage('Заметка создана');
+                    loadNotes();
+                } else {
+                    const data = await response.json();
+                    showMessage(data.error || 'Ошибка создания', true);
+                }
+            } catch (error) {
+                showMessage('Ошибка соединения', true);
+            }
+        }
+
+        async function deleteNote(id) {
+            if (!confirm('Удалить заметку?')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/notes/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+
+                if (response.ok) {
+                    showMessage('Заметка удалена');
+                    loadNotes();
+                }
+            } catch (error) {
+                showMessage('Ошибка удаления', true);
+            }
+        }
+
+        async function editNote(id) {
+            const newTitle = prompt('Новый заголовок:');
+            if (newTitle === null) return;
+
+            const newContent = prompt('Новый текст:');
+            if (newContent === null) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/notes/${id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify({ title: newTitle, content: newContent })
+                });
+
+                if (response.ok) {
+                    showMessage('Заметка обновлена');
+                    loadNotes();
+                }
+            } catch (error) {
+                showMessage('Ошибка обновления', true);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        loadNotes();
+    </script>
+</body>
+</html>

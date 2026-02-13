@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Регистрация</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #debug-info {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            display: none;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+        }
+        .error-feedback {
+            color: #dc3545;
+            font-size: 12px;
+            margin-top: 5px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-4">
+                <h2 class="mb-4">Регистрация</h2>
+                <div id="message"></div>
+
+                <form id="registerForm" onsubmit="event.preventDefault(); register();">
+                    <div class="mb-3">
+                        <label>Имя пользователя</label>
+                        <input type="text" class="form-control" id="username" placeholder="min 3 символа" required>
+                        <div class="error-feedback" id="usernameError"></div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label>Email</label>
+                        <input type="email" class="form-control" id="email" placeholder="email@example.com" required>
+                        <div class="error-feedback" id="emailError"></div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label>Пароль</label>
+                        <input type="password" class="form-control" id="password" placeholder="min 6 символов" required>
+                        <div class="error-feedback" id="passwordError"></div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100 mb-3" id="registerBtn">
+                        Зарегистрироваться
+                    </button>
+                </form>
+
+                <p class="text-center">
+                    <a href="/login">Уже есть аккаунт? Войти</a>
+                </p>
+
+                <button type="button" class="btn btn-sm btn-secondary w-100 mt-2" onclick="toggleDebug()">
+                    Показать отладку
+                </button>
+                <div id="debug-info"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let debugVisible = false;
+
+        function toggleDebug() {
+            debugVisible = !debugVisible;
+            document.getElementById('debug-info').style.display = debugVisible ? 'block' : 'none';
+        }
+
+        function addDebug(text) {
+            const debugDiv = document.getElementById('debug-info');
+            const time = new Date().toLocaleTimeString();
+            debugDiv.innerHTML += `<div>[${time}] ${text}</div>`;
+            console.log('🔍 DEBUG:', text);
+        }
+
+        function clearDebug() {
+            document.getElementById('debug-info').innerHTML = '';
+        }
+
+        function showError(elementId, message) {
+            document.getElementById(elementId).textContent = message;
+            document.getElementById(elementId).style.display = 'block';
+        }
+
+        function hideErrors() {
+            document.querySelectorAll('.error-feedback').forEach(el => {
+                el.style.display = 'none';
+                el.textContent = '';
+            });
+        }
+
+        async function register() {
+            clearDebug();
+            hideErrors();
+            addDebug('🚀 Начинаем регистрацию...');
+
+            const username = document.getElementById('username').value.trim();
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value.trim();
+
+            addDebug(`📝 Username: "${username}"`);
+            addDebug(`📝 Email: "${email}"`);
+            addDebug(`📝 Password: ${password ? '******' : 'пусто'}`);
+
+            let hasError = false;
+
+            if (!username) {
+                showError('usernameError', 'Имя пользователя обязательно');
+                hasError = true;
+            } else if (username.length < 3) {
+                showError('usernameError', 'Минимум 3 символа');
+                hasError = true;
+            }
+
+            if (!email) {
+                showError('emailError', 'Email обязателен');
+                hasError = true;
+            } else if (!email.includes('@')) {
+                showError('emailError', 'Некорректный email');
+                hasError = true;
+            }
+
+            if (!password) {
+                showError('passwordError', 'Пароль обязателен');
+                hasError = true;
+            } else if (password.length < 6) {
+                showError('passwordError', 'Минимум 6 символов');
+                hasError = true;
+            }
+
+            if (hasError) {
+                addDebug('❌ Ошибка валидации на клиенте');
+                return;
+            }
+
+            const requestData = {
+                username: username,
+                email: email,
+                password: password
+            };
+
+            addDebug('📦 Отправляемые данные: ' + JSON.stringify(requestData, null, 2));
+
+            const btn = document.getElementById('registerBtn');
+            btn.disabled = true;
+            btn.textContent = 'Отправка...';
+
+            try {
+                addDebug('📡 Отправка POST запроса на /api/register');
+
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                addDebug(`📥 Статус ответа: ${response.status} ${response.statusText}`);
+
+                const responseData = await response.json();
+                addDebug('📥 Ответ сервера: ' + JSON.stringify(responseData, null, 2));
+
+                if (response.ok) {
+                    addDebug('✅ Регистрация успешна! Сохраняем токен...');
+                    localStorage.setItem('token', responseData.token);
+                    showMessage('Регистрация успешна! Перенаправление...');
+
+                    // Перенаправляем на главную
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1500);
+                } else {
+                    addDebug(`❌ Ошибка сервера: ${responseData.error || 'Неизвестная ошибка'}`);
+                    showMessage(responseData.error || 'Ошибка регистрации', true);
+                }
+            } catch (error) {
+                addDebug(`❌ Ошибка соединения: ${error.message}`);
+                showMessage('Ошибка соединения с сервером. Проверьте консоль (F12).', true);
+                console.error('Registration error:', error);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Зарегистрироваться';
+            }
+        }
+
+        function showMessage(text, isError = false) {
+            const msgDiv = document.getElementById('message');
+            msgDiv.innerHTML = `<div class="alert ${isError ? 'alert-danger' : 'alert-success'} alert-dismissible fade show" role="alert">${text}</div>`;
+
+            setTimeout(() => {
+                const alert = msgDiv.querySelector('.alert');
+                if (alert) alert.remove();
+            }, 5000);
+        }
+
+        document.getElementById('email').addEventListener('input', function() {
+            const email = this.value.trim();
+            const errorDiv = document.getElementById('emailError');
+            if (email && !email.includes('@')) {
+                errorDiv.textContent = 'Некорректный email';
+                errorDiv.style.display = 'block';
+            } else {
+                errorDiv.style.display = 'none';
+            }
+        });
+
+        document.getElementById('username').addEventListener('input', function() {
+            const username = this.value.trim();
+            const errorDiv = document.getElementById('usernameError');
+            if (username && username.length < 3) {
+                errorDiv.textContent = 'Минимум 3 символа';
+                errorDiv.style.display = 'block';
+            } else {
+                errorDiv.style.display = 'none';
+            }
+        });
+
+        document.getElementById('password').addEventListener('input', function() {
+            const password = this.value.trim();
+            const errorDiv = document.getElementById('passwordError');
+            if (password && password.length < 6) {
+                errorDiv.textContent = 'Минимум 6 символов';
+                errorDiv.style.display = 'block';
+            } else {
+                errorDiv.style.display = 'none';
+            }
+        });
+
+        if (localStorage.getItem('token')) {
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>
